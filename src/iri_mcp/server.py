@@ -13,7 +13,7 @@ from mcp.server import MCPServer
 
 from . import __version__
 from .config import Config
-from .iritools import compute, filesystem, observability
+from .iritools import compute, filesystem, observability, resources
 from .prompt import register_prompt
 from .runner import IriRunner, Runner
 
@@ -51,6 +51,7 @@ def build_server(config: Config, runner: Runner | None = None) -> MCPServer:
     observability.register(mcp, active)
     compute.register(mcp, active)
     filesystem.register(mcp, active)
+    resources.register(mcp, active)
     register_prompt(mcp)
     return mcp
 

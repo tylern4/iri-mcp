@@ -159,6 +159,26 @@ async def run(base_url: str, allow_submit: bool, allow_fs_write: bool) -> None:
             checksum = _text(await _call(session, "fs_checksum", {"path": OUT}))
             _check("fs_checksum returns hex checksum", "d1" * 32 == checksum, checksum)
 
+            templates = await session.list_resource_templates()
+            template_uris = {t.uri_template for t in templates.resource_templates}
+            _check(
+                "resources/templates exposes job + file templates",
+                template_uris == {"iri://jobs/{job_id}", "iri://files{+path}"},
+                str(template_uris),
+            )
+
+            job_resource = await session.read_resource(f"iri://jobs/{job_id}")
+            job_json = job_resource.contents[0].text
+            _check("job resource returns completed JSON", '"state": "completed"' in job_json, job_json)
+
+            file_resource = await session.read_resource(f"iri://files{OUT}")
+            file_text = file_resource.contents[0].text
+            _check(
+                "file resource reads the output file",
+                "hello from the fake backend" in file_text,
+                file_text,
+            )
+
             print("SMOKE PASS")
 
     print("smoke client complete")

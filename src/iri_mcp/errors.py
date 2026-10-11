@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any, TypeVar
 
+import httpx
 from iri_client import AuthError, IriError, ResourceLookupError
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -32,6 +33,12 @@ def friendly_message(exc: Exception) -> str:
         return f"resource lookup failed: {exc}"
     if isinstance(exc, TimeoutError):
         return f"operation timed out: {exc}"
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        return (
+            f"IRI API error: HTTP {response.status_code} {response.reason_phrase} "
+            f"for {exc.request.method} {exc.request.url.path}"
+        )
     if isinstance(exc, IriError):
         return f"IRI API error: {exc}"
     return f"unexpected error: {type(exc).__name__}: {exc}"

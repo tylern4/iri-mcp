@@ -2,6 +2,39 @@
 
 Checkpoint log for `iri-mcp`. One entry per session/issue. Latest first.
 
+## 2026-10-11 — Session 1 (M3 stretch): resources + friendly 4xx
+
+**What changed** — stretch resources implemented, plus a small error-mapping fix:
+
+- `src/iri_mcp/iritools/resources.py` (new) — read-only resources registered in
+  `build_server`:
+  - `iri://jobs/{job_id}` → `get_job` serialized as JSON (`JobResult`).
+  - `iri://files{+path}` → capped text file; `{+path}` reserved expansion keeps
+    slashes literal so absolute paths work naturally
+    (`iri://files/pscratch/sd/e/elvis/job.out`);
+    `ResourceSecurity(reject_absolute_paths=False)` still rejects `..`/NUL.
+  - `_friendly` wrapper (`functools.wraps` so the SDK can introspect template
+    params) maps exceptions via `friendly_message` → `ResourceError`.
+- `src/iri_mcp/errors.py` — `friendly_message` now maps `httpx.HTTPStatusError`
+  → `IRI API error: HTTP <code> <reason> for <METHOD> <path>` (covers both tools
+  and resources; previously a raw status dump).
+- `tests/test_resources.py` (new, 8 tests) — template registration, job JSON,
+  file read, credentials required, missing-job friendly error, traversal
+  rejected, unknown URI.
+- `scripts/smoke_client.py` — now also asserts `resources/templates` (both
+  templates), a `jobs/{id}` JSON read, and a `files{+path}` read end to end.
+- Docs/contract: README tool-surface + intro, `docs/demo.md`, PLAN §1/§2/§3.5/
+  §4.6 and §8 deviation entry.
+
+**Test evidence** — `uv run ruff check .` clean. `uv run pytest -q` →
+**114 passed** (106 + 8 resources). `scripts/smoke_mcp.sh` → **SMOKE PASS** with
+the three new resource checks.
+
+**Open issues** — GitHub remote push still deferred (no gh auth). Live IRI
+calls still blocked (no account/token; `IRI_MCP_LIVE=1` only). Client dep still
+pinned to `@main` (pin to a tag before production); upstream `upload` fd leak
+noted in PLAN §8. Privileged surface exercised under opencode only read-only.
+
 ## 2026-10-11 — Session 1 (M3): docs, CI, harness integration
 
 **What changed** — M3 deliverables landed; smoke fixed and verified:

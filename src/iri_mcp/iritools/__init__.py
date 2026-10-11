@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from . import compute, filesystem, observability
+from . import compute, filesystem, observability, resources
 
-__all__ = ["compute", "filesystem", "observability"]
+__all__ = ["compute", "filesystem", "observability", "resources"]

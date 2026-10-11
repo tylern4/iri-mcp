@@ -12,6 +12,8 @@ MCP client driving it like an agent harness would.
   `wait_job`
 - Filesystem: `fs_head`, `fs_checksum` (plus `submit_job` ran with
   `--allow-fs-write` so `stdout_path` targeting works for tail recovery)
+- Resources (`resources/templates` + `resources/read`): `iri://jobs/{job_id}`
+  and `iri://files{+path}`
 - A real `uv run python -m iri_mcp` subprocess speaking protocol on stdio
 
 ## Run it
@@ -37,6 +39,9 @@ ok   run_job returns stdout tail
 ok   wait_job completes submitted job
 ok   fs_head reads the output file
 ok   fs_checksum returns hex checksum
+ok   resources/templates exposes job + file templates
+ok   job resource returns completed JSON
+ok   file resource reads the output file
 SMOKE PASS
 ```
 

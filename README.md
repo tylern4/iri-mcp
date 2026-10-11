@@ -2,7 +2,7 @@
 
 A Model Context Protocol (MCP) server exposing the NERSC Integrated Research
 Infrastructure (IRI) API ([`api.iri.nersc.gov`](https://api.iri.nersc.gov)) as
-MCP tools, a workflow prompt, and (stretch) resources — so any agent harness
+MCP tools, a workflow prompt, and read-only resources — so any agent harness
 can submit and monitor jobs, inspect results, and manage files on NERSC compute
 through standard MCP tool calls.
 
@@ -68,6 +68,10 @@ Filesystem writes (`--allow-fs-write`): `fs_write_text`, `fs_mkdir`, `fs_copy`,
 `fs_move`, `fs_remove`, `fs_symlink`.
 
 Prompt: `conduct-scientific-workflow`.
+
+Resources (read-only, always available): `iri://jobs/{job_id}` (job status as
+JSON) and `iri://files{+path}` (capped text file contents; absolute remote paths
+supported, traversal rejected).
 
 Full contract and configuration reference: [`PLAN.md`](PLAN.md).
 
