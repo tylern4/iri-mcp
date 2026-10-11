@@ -20,7 +20,10 @@ from .safety import PolicyError
 
 _F = TypeVar("_F", bound=Callable[..., Awaitable[Any]])
 
-AUTH_HINT = "no credentials: set IRI_API_TOKEN or ~/.ssh/nersc-token"
+AUTH_HINT = (
+    "no credentials: set IRI_API_TOKEN (or ALCF_API_TOKEN / ESNET_API_TOKEN), "
+    "or a token file such as ~/.ssh/nersc-token"
+)
 
 
 def friendly_message(exc: Exception) -> str:

@@ -117,6 +117,10 @@ class FakeIRI:
     auto_complete: bool = True
     """When True, freshly submitted jobs immediately reach 'completed' (exit 0)."""
 
+    discovery_status: int | None = None
+    """When set, ``compute/resources`` and ``filesystem/resources`` fail with
+    this HTTP status (e.g. 501, as ALCF does); status-based discovery is used."""
+
     calls: list[tuple[str, str]] = field(default_factory=list)
     """(method, api-key) for every request."""
 
@@ -192,8 +196,12 @@ class FakeIRI:
         if key == "account/projects":
             return self._respond(self.projects)
         if key == "compute/resources":
+            if self.discovery_status is not None:
+                return self._respond({"detail": "Not implemented yet."}, self.discovery_status)
             return self._respond(COMPUTE_RESOURCES)
         if key == "filesystem/resources":
+            if self.discovery_status is not None:
+                return self._respond({"detail": "Not implemented yet."}, self.discovery_status)
             return self._respond(FILESYSTEM_RESOURCES)
 
         if key.startswith("compute/job/"):

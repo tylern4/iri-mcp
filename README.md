@@ -1,10 +1,20 @@
 # iri-mcp
 
-A Model Context Protocol (MCP) server exposing the NERSC Integrated Research
-Infrastructure (IRI) API ([`api.iri.nersc.gov`](https://api.iri.nersc.gov)) as
-MCP tools, a workflow prompt, and read-only resources — so any agent harness
-can submit and monitor jobs, inspect results, and manage files on NERSC compute
-through standard MCP tool calls.
+A Model Context Protocol (MCP) server exposing the Integrated Research
+Infrastructure (IRI) Facility API as MCP tools, a workflow prompt, and
+read-only resources — so any agent harness can submit and monitor jobs, inspect
+results, and manage files on HPC facility compute through standard MCP tool
+calls.
+
+The same IRI Facility API is implemented by several DOE facilities, and this
+server speaks all of them — select one with `--facility` (see
+[Facilities](#facilities)):
+
+| `--facility` | Facility | API base URL |
+| --- | --- | --- |
+| `nersc` (default) | NERSC | `https://api.iri.nersc.gov/api/v1` |
+| `alcf` | ALCF | `https://api.alcf.anl.gov/api/v1` |
+| `esnet` | ESnet | `https://iri-dev.ppg.es.net/api/v1` |
 
 > **Prototype status.** This is the first artifact of a larger plan: the same
 > server becomes the substrate for an evaluation harness that scores whether an
@@ -31,6 +41,7 @@ uv sync --extra dev
 uv run python -m iri_mcp                       # readonly, observability + fs reads
 uv run python -m iri_mcp --allow-submit        # + job submit/run/cancel
 uv run python -m iri_mcp --allow-submit --allow-fs-write   # + file writes
+uv run python -m iri_mcp --facility alcf --allow-submit    # target ALCF instead
 ```
 
 The server speaks MCP over stdio; register it in any client harness (opencode,
@@ -38,14 +49,48 @@ Claude Code, Claude Desktop, Cursor, or anything honoring the MCP spec — the
 server name is `iri`). See [docs/](docs/) and the integration appendix in the
 README.
 
+## Facilities
+
+All three facilities implement the same IRI Facility API, so the tool surface is
+identical. A facility preset supplies the base URL, the resource names to bind,
+how those resources are discovered, and where the bearer token comes from; any
+of these can still be overridden with `--api-base-url`, `--compute-resource`,
+`--filesystem-resource`, or `IRI_MCP_*` environment variables.
+
+| Facility | Compute resource | Filesystem resource | Discovery | Token sources |
+| --- | --- | --- | --- | --- |
+| NERSC | `jobs` | `scratch` | `/compute/resources` | `IRI_API_TOKEN`, `~/.ssh/nersc-token` |
+| ALCF | `Polaris` (also `Aurora`, `Crux`, …) | `Eagle` (also `Flare`, `Home`) | `/status/resources` | `ALCF_API_TOKEN`, `~/.ssh/alcf-token` |
+| ESnet | `compute` (group) | `storage` (group) | `/compute/resources` | `ESNET_API_TOKEN`, `~/.ssh/esnet-token` |
+
+Notes:
+
+- **Discovery.** NERSC and ESnet implement the per-router discovery endpoints
+  (`/compute/resources`, `/filesystem/resources`). ALCF returns HTTP 501 there,
+  so it (and any deployment that stops implementing router discovery) is served
+  from the public `/status/resources` list, filtered by `resource_type`.
+- **Resource names.** `--compute-resource` / `--filesystem-resource` accept a
+  resource id, name, or group; matching is case-insensitive. Use
+  `get_resource_status` to list what a facility currently exposes.
+- **Tokens.** Resolution order is `IRI_MCP_API_TOKEN`, the facility variable
+  above, then the facility token file. If none is set the client falls back to
+  `IRI_API_TOKEN` / `~/.ssh/nersc-token`. ALCF issues Globus-backed bearer
+  tokens via `alcf-tokens` (see the [ALCF IRI API docs](https://docs.alcf.anl.gov/services/iri-api/)).
+  Privileged calls only; public observability/read endpoints need no token.
+- **ALCF caveat.** Resource ids at ALCF are UUIDs that can change; the `Polaris`
+  / `Eagle` defaults are resolved by name through `/status/resources`, so they
+  track the current deployment.
+
 ## Security model
 
 - **Read-only by default.** Job submission/cancellation and filesystem writes
   are explicit opt-ins (`--allow-submit`, `--allow-fs-write`).
 - **Caps enforced centrally** (duration, nodes, processes, queue allowlist,
   read size/lines, write size) — see `PLAN.md` §3.
-- **No new secret handling.** The IRI token is resolved lazily from
-  `IRI_API_TOKEN` or `~/.ssh/nersc-token` by the client.
+- **Facility-aware token resolution, no new stores.** The token is resolved
+  lazily from `IRI_MCP_API_TOKEN`, the selected facility's environment variable,
+  or its token file (see [Facilities](#facilities)); nothing is cached or
+  written.
 - **Audit log** for every privileged call and policy denial (stderr or
   `--audit-file`).
 - **Residual risk:** MCP access grants the harness whatever your credentials can
@@ -89,6 +134,7 @@ All tests are hermetic (canned HTTP / stubbed client). Live IRI calls require
 ## Layout
 
 - `iri_mcp/config.py` — CLI flags + env, precedence CLI > env > defaults
+- `iri_mcp/facilities.py` — NERSC/ALCF/ESnet presets (base URL, resources, tokens)
 - `iri_mcp/safety.py` — `Policy` gate + caps + audit
 - `iri_mcp/runner.py` — `Runner` interface + `IriRunner`
 - `iri_mcp/iritools/` — tool handlers (observability / compute / filesystem)
@@ -104,7 +150,8 @@ The server speaks MCP over stdio; the server name is `iri`. In every harness
 below the command is `uv run python -m iri_mcp` — replace `uv` with its
 absolute path (`command -v uv`) in launchers that don't inherit your shell
 environment, and add `--allow-submit` / `--allow-fs-write` to grant compute /
-filesystem writes (see [Security model](#security-model)).
+filesystem writes (see [Security model](#security-model)). Add
+`--facility alcf` (or `esnet`) to target another facility.
 
 The repo ships an [`opencode.json`](opencode.json) that wires the server up for
 opencode out of the box.

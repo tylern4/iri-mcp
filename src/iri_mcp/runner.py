@@ -16,10 +16,14 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from enum import Enum
 from typing import Any
 
-from iri_client import AsyncClient, IriError
-from iri_client._models import JobSpec, JobState, JobStatus
+import httpx
+from iri_client import AsyncClient, IriError, ResourceLookupError
+from iri_client._async.compute import AsyncCompute
+from iri_client._async.filesystem import AsyncFilesystem
+from iri_client._models import JobSpec, JobState, JobStatus, Resource, ResourceType
 
 from .client import client_session
 from .config import Config
@@ -38,9 +42,34 @@ ClientFactory = Callable[[], AbstractAsyncContextManager[AsyncClient]]
 
 def _default_client_factory(config: Config) -> ClientFactory:
     def factory() -> AbstractAsyncContextManager[AsyncClient]:
-        return client_session(config)
+        return client_session(config, access_token=config.resolve_token())
 
     return factory
+
+
+def _select_resource(resources: list[Resource], name: str, kind: str) -> Resource:
+    """Pick the resource matching ``name`` by id, name, or group.
+
+    Matching is case-insensitive so ``--compute-resource polaris`` resolves the
+    ``Polaris`` resource. ``kind`` only shapes the error message.
+    """
+    target = name.value if isinstance(name, Enum) else str(name)
+    for resource in resources:
+        if target in (resource.id, resource.name, resource.group):
+            return resource
+    lowered = target.lower()
+    for resource in resources:
+        candidates = {
+            str(resource.id).lower(),
+            str(resource.name).lower(),
+            str(resource.group).lower(),
+        }
+        if lowered in candidates:
+            return resource
+    available = ", ".join(sorted({str(r.name) for r in resources})) or "(none)"
+    raise ResourceLookupError(
+        f"no {kind} resource matching {target!r}; available: {available}"
+    )
 
 
 def _to_job_spec(spec: JobSpecInput) -> JobSpec:
@@ -161,7 +190,7 @@ class IriRunner(Runner):
     async def submit(self, spec: JobSpecInput) -> JobResult:
         self._gate_submit("submit_job", spec)
         async with self._client_factory() as client:
-            compute = await client.compute(self._config.compute_resource)
+            compute = await self._compute(client)
             job = await compute.submit(_to_job_spec(spec))
             status = await job.status
         return _job_result(job.id, status, submitted=True)
@@ -169,7 +198,7 @@ class IriRunner(Runner):
     async def run_job(self, spec: JobSpecInput, timeout: float = 600.0) -> JobResult:
         self._gate_submit("run_job", spec)
         async with self._client_factory() as client:
-            compute = await client.compute(self._config.compute_resource)
+            compute = await self._compute(client)
             job = await compute.submit(_to_job_spec(spec))
             status, timed_out = await self._await_status(client, compute, job.id, timeout)
             stdout_tail, stderr_tail, tails_capped, tail_error = await self._read_tails(
@@ -189,7 +218,7 @@ class IriRunner(Runner):
 
     async def wait(self, job_id: str, timeout: float | None = None) -> JobResult:
         async with self._client_factory() as client:
-            compute = await client.compute(self._config.compute_resource)
+            compute = await self._compute(client)
             status, timed_out = await self._await_status(client, compute, job_id, timeout)
             stdout_path, stderr_path = await self._spec_paths(client, compute, job_id)
             stdout_tail, stderr_tail, tails_capped, tail_error = await self._read_tails(
@@ -208,7 +237,7 @@ class IriRunner(Runner):
 
     async def get_job(self, job_id: str) -> JobResult:
         async with self._client_factory() as client:
-            compute = await client.compute(self._config.compute_resource)
+            compute = await self._compute(client)
             job = await compute.job(job_id)
             status = await job.status
         return _job_result(job_id, status)
@@ -225,7 +254,7 @@ class IriRunner(Runner):
         if queue is not None:
             filters["queue_name"] = queue
         async with self._client_factory() as client:
-            compute = await client.compute(self._config.compute_resource)
+            compute = await self._compute(client)
             jobs = await compute.list(filters=filters, limit=limit)
             results: list[JobResult] = []
             for job in jobs:
@@ -237,7 +266,7 @@ class IriRunner(Runner):
         self.policy.require_submit(tool="cancel_job")
         self.policy.audit(tool="cancel_job", allowed=True, job_id=job_id)
         async with self._client_factory() as client:
-            compute = await client.compute(self._config.compute_resource)
+            compute = await self._compute(client)
             job = await compute.job(job_id)
             await job.cancel()
         return f"cancel request sent for job {job_id}"
@@ -248,36 +277,36 @@ class IriRunner(Runner):
 
     async def fs_list(self, path: str, limit: int = 50) -> list[dict[str, Any]]:
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             entries = await fs.list(path)
         return list(entries[: max(0, int(limit))])
 
     async def fs_head(self, path: str, lines: int = 10) -> str:
         bounded = self.policy.cap_lines(lines)
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             return await fs.head(path, lines=bounded)
 
     async def fs_tail(self, path: str, lines: int = 10) -> str:
         bounded = self.policy.cap_lines(lines)
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             return await fs.tail(path, lines=bounded)
 
     async def fs_stat(self, path: str) -> dict[str, Any]:
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             return await fs.stat(path)
 
     async def checksum(self, path: str) -> str:
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             return await fs.checksum(path)
 
     async def read_file(self, path: str, max_bytes: int | None = None) -> str:
         bounded = self.policy.cap_read_bytes(max_bytes)
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             return await fs.head(path, bytes_=bounded)
 
     async def fs_write_text(self, path: str, content: str) -> str:
@@ -292,7 +321,7 @@ class IriRunner(Runner):
             with os.fdopen(handle, "wb") as fh:
                 fh.write(raw)
             async with self._client_factory() as client:
-                fs = await client.filesystem(self._config.filesystem_resource)
+                fs = await self._filesystem(client)
                 await fs.upload(tmp, path)
         finally:
             try:
@@ -304,35 +333,35 @@ class IriRunner(Runner):
     async def fs_mkdir(self, path: str, parent: bool = True) -> str:
         self._gate_fs_write("fs_mkdir", path=path)
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             await fs.mkdir(path, parent=parent)
         return f"mkdir: created {path}"
 
     async def fs_copy(self, path: str, target_path: str) -> str:
         self._gate_fs_write("fs_copy", path=path, target_path=target_path)
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             await fs.copy(path, target_path)
         return f"copied {path} -> {target_path}"
 
     async def fs_move(self, path: str, target_path: str) -> str:
         self._gate_fs_write("fs_move", path=path, target_path=target_path)
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             await fs.move(path, target_path)
         return f"moved {path} -> {target_path}"
 
     async def fs_remove(self, path: str) -> str:
         self._gate_fs_write("fs_remove", path=path)
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             await fs.rm(path)
         return f"removed {path}"
 
     async def fs_symlink(self, path: str, link_path: str) -> str:
         self._gate_fs_write("fs_symlink", path=path, link_path=link_path)
         async with self._client_factory() as client:
-            fs = await client.filesystem(self._config.filesystem_resource)
+            fs = await self._filesystem(client)
             await fs.symlink(path, link_path)
         return f"symlink {link_path} -> {path}"
 
@@ -348,6 +377,57 @@ class IriRunner(Runner):
     def _gate_fs_write(self, tool: str, **fields: Any) -> None:
         self.policy.require_fs_write(tool=tool)
         self.policy.audit(tool=tool, allowed=True, **fields)
+
+    async def _compute(self, client: AsyncClient) -> AsyncCompute:
+        """Bind the configured compute resource (dynamically or by direct id)."""
+        resource_id = await self._resolve_resource(client, kind="compute")
+        return AsyncCompute(
+            id=resource_id, name=self._config.compute_resource, client=client
+        )
+
+    async def _filesystem(self, client: AsyncClient) -> AsyncFilesystem:
+        """Bind the configured filesystem resource (dynamically or by direct id)."""
+        resource_id = await self._resolve_resource(client, kind="filesystem")
+        return AsyncFilesystem(
+            id=resource_id, name=self._config.filesystem_resource, client=client
+        )
+
+    async def _resolve_resource(self, client: AsyncClient, *, kind: str) -> str:
+        if kind == "compute":
+            name = self._config.compute_resource
+            strategy = self._config.compute_discovery
+        else:
+            name = self._config.filesystem_resource
+            strategy = self._config.filesystem_discovery
+        resources = await self._discover_resources(client, kind=kind, strategy=strategy)
+        return _select_resource(resources, name, kind).id
+
+    async def _discover_resources(
+        self, client: AsyncClient, *, kind: str, strategy: str
+    ) -> list[Resource]:
+        """List resources, preferring router discovery and falling back to status.
+
+        NERSC and ESnet implement ``/compute/resources`` and
+        ``/filesystem/resources``. ALCF returns 501 there, so it (and any
+        deployment that stops implementing router discovery) is served from the
+        public ``/status/resources`` list filtered by ``resource_type``.
+        """
+        if strategy == "router":
+            try:
+                if kind == "compute":
+                    return await client.compute_resources()
+                return await client.filesystem_resources()
+            except (IriError, httpx.HTTPStatusError):
+                strategy = "status"
+        response = await client.get("status/resources")
+        resources = [Resource.model_validate(item) for item in response.json()]
+        wanted = ResourceType.compute if kind == "compute" else ResourceType.storage
+        filtered = [
+            r
+            for r in resources
+            if r.resource_type == wanted or kind in (r.supported_endpoints or ())
+        ]
+        return filtered or resources
 
     async def _await_status(
         self,
@@ -393,7 +473,7 @@ class IriRunner(Runner):
         requested = TAIL_LINES
         lines = self.policy.cap_lines(requested)
         tails_capped = lines < requested
-        fs = await client.filesystem(self._config.filesystem_resource)
+        fs = await self._filesystem(client)
         stdout_tail = stderr_tail = None
         tail_error: str | None = None
         if stdout_path:

@@ -13,8 +13,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from .facilities import (
+    DEFAULT_FACILITY,
+    FACILITIES,
+    Facility,
+    facility_for,
+    resolve_token,
+)
+
 ENV_PREFIX = "IRI_MCP_"
-DEFAULT_API_BASE_URL = "https://api.iri.nersc.gov/api/v1"
+DEFAULT_API_BASE_URL = FACILITIES[DEFAULT_FACILITY].base_url
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -32,6 +40,10 @@ class Config(BaseModel):
     """Immutable server configuration."""
 
     model_config = ConfigDict(frozen=True)
+
+    # Facility selection (NERSC | ALCF | ESnet); fills base URL + resource
+    # defaults unless overridden explicitly.
+    facility: str = DEFAULT_FACILITY
 
     # Transport / server
     api_base_url: str = DEFAULT_API_BASE_URL
@@ -74,6 +86,30 @@ class Config(BaseModel):
     def fs_write_enabled(self) -> bool:
         return (not self.readonly_explicit) and self.allow_fs_write
 
+    @property
+    def profile(self) -> Facility:
+        """The :class:`Facility` bindings for the selected ``facility``."""
+        return facility_for(self.facility)
+
+    @property
+    def compute_discovery(self) -> str:
+        """Resource-discovery strategy for compute (``router`` or ``status``)."""
+        return self.profile.compute_discovery
+
+    @property
+    def filesystem_discovery(self) -> str:
+        """Resource-discovery strategy for filesystems (``router``/``status``)."""
+        return self.profile.filesystem_discovery
+
+    def resolve_token(self, environ: Mapping[str, str] | None = None) -> str | None:
+        """Resolve a bearer token for the configured facility (env, then file)."""
+        return resolve_token(self.profile, environ)
+
+    @field_validator("facility")
+    @classmethod
+    def _check_facility(cls, value: str) -> str:
+        return facility_for(value).key
+
     @field_validator("transport")
     @classmethod
     def _check_transport(cls, value: str) -> str:
@@ -92,8 +128,11 @@ class Config(BaseModel):
 
         parser = argparse.ArgumentParser(
             prog="iri-mcp",
-            description="MCP server for the NERSC IRI API.",
+            description=(
+                "MCP server for the NERSC, ALCF, and ESnet IRI Facility APIs."
+            ),
         )
+        parser.add_argument("--facility", choices=sorted(FACILITIES), default=None)
         parser.add_argument("--api-base-url", default=None)
         parser.add_argument(
             "--transport", choices=["stdio", "streamable-http"], default=None
@@ -150,9 +189,13 @@ class Config(BaseModel):
                 )
             allowed_queues = tuple(sorted(set(parts))) or None
 
+        facility_raw = str(pick(args.facility, "IRI_MCP_FACILITY", DEFAULT_FACILITY))
+        profile = facility_for(facility_raw)
+
         return cls(
+            facility=profile.key,
             api_base_url=str(
-                pick(args.api_base_url, "IRI_MCP_API_BASE_URL", DEFAULT_API_BASE_URL)
+                pick(args.api_base_url, "IRI_MCP_API_BASE_URL", profile.base_url)
             ),
             transport=str(pick(args.transport, "IRI_MCP_TRANSPORT", "stdio")),
             host=str(pick(args.host, "IRI_MCP_HOST", "127.0.0.1")),
@@ -180,13 +223,17 @@ class Config(BaseModel):
             allowed_queues=allowed_queues,
             audit_file=pick(args.audit_file, "IRI_MCP_AUDIT_FILE", None),
             compute_resource=str(
-                pick(args.compute_resource, "IRI_MCP_COMPUTE_RESOURCE", "jobs")
+                pick(
+                    args.compute_resource,
+                    "IRI_MCP_COMPUTE_RESOURCE",
+                    profile.compute_resource,
+                )
             ),
             filesystem_resource=str(
                 pick(
                     args.filesystem_resource,
                     "IRI_MCP_FILESYSTEM_RESOURCE",
-                    "scratch",
+                    profile.filesystem_resource,
                 )
             ),
             wait_interval=float(

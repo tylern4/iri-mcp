@@ -1,8 +1,14 @@
 # Demo: iri-mcp end to end (offline)
 
-This walkthrough shows the whole system working without touching the live NERSC
+This walkthrough shows the whole system working without touching a live facility
 API: a canned fake backend, a real `iri-mcp` server over MCP stdio, and a real
 MCP client driving it like an agent harness would.
+
+The fake implements the same IRI Facility API contract as NERSC, ALCF, and
+ESnet, so the same smoke exercises any `--facility` preset; the script runs with
+the default (`nersc`) and its fake reports itself as NERSC. To point a real
+server at another facility, add `--facility alcf` (or `esnet`) — see the README
+[Facilities](../README.md#facilities) section.
 
 ## What it proves
 

@@ -1,7 +1,7 @@
 [project]
 name = "iri-mcp"
 version = "0.1.0"
-description = "MCP server exposing the NERSC IRI API (jobs, files, status) to agent harnesses"
+description = "MCP server exposing IRI facility APIs (NERSC, ALCF, ESnet): jobs, files, status"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

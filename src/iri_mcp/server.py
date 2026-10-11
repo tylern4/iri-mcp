@@ -20,14 +20,15 @@ from .runner import IriRunner, Runner
 logger = logging.getLogger(__name__)
 
 SERVER_NAME = "iri"
-SERVER_TITLE = "NERSC IRI"
-SERVER_DESCRIPTION = (
-    "Tools for the NERSC Integrated Research Infrastructure (IRI) API: jobs, "
-    "files, facility status, and a scientific-workflow prompt."
-)
 
-SERVER_INSTRUCTIONS = (
-    "You are connected to the NERSC IRI MCP server. Read-only by default: "
+# Identity copy is rendered per configured facility (NERSC | ALCF | ESnet).
+SERVER_TITLE_TEMPLATE = "{facility} IRI"
+SERVER_DESCRIPTION_TEMPLATE = (
+    "Tools for the {facility} Integrated Research Infrastructure (IRI) API: "
+    "jobs, files, facility status, and a scientific-workflow prompt."
+)
+SERVER_INSTRUCTIONS_TEMPLATE = (
+    "You are connected to the {facility} IRI MCP server. Read-only by default: "
     "observability tools and filesystem reads are always available, while job "
     "submission/cancellation and filesystem writes require the operator to have "
     "started the server with --allow-submit / --allow-fs-write. The server "
@@ -37,22 +38,28 @@ SERVER_INSTRUCTIONS = (
     "conduct-scientific-workflow prompt for the full set of conventions."
 )
 
+# NERSC-rendered defaults, kept as module constants for callers/tests.
+SERVER_TITLE = SERVER_TITLE_TEMPLATE.format(facility="NERSC")
+SERVER_DESCRIPTION = SERVER_DESCRIPTION_TEMPLATE.format(facility="NERSC")
+SERVER_INSTRUCTIONS = SERVER_INSTRUCTIONS_TEMPLATE.format(facility="NERSC")
+
 
 def build_server(config: Config, runner: Runner | None = None) -> MCPServer:
     """Assemble a fully-registered MCPServer for the given configuration."""
     active = runner if runner is not None else IriRunner(config)
+    facility = config.profile.display_name
     mcp = MCPServer(
         name=SERVER_NAME,
-        title=SERVER_TITLE,
-        description=SERVER_DESCRIPTION,
-        instructions=SERVER_INSTRUCTIONS,
+        title=SERVER_TITLE_TEMPLATE.format(facility=facility),
+        description=SERVER_DESCRIPTION_TEMPLATE.format(facility=facility),
+        instructions=SERVER_INSTRUCTIONS_TEMPLATE.format(facility=facility),
         version=__version__,
     )
     observability.register(mcp, active)
     compute.register(mcp, active)
     filesystem.register(mcp, active)
     resources.register(mcp, active)
-    register_prompt(mcp)
+    register_prompt(mcp, facility=facility)
     return mcp
 
 

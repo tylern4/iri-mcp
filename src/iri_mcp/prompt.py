@@ -9,15 +9,15 @@ from __future__ import annotations
 from mcp.server import MCPServer
 from mcp.server.mcpserver import AssistantMessage, Message, UserMessage
 
-WORKFLOW_DESCRIPTION = (
-    "Conventions for running a scientific workflow on NERSC IRI through the "
+WORKFLOW_DESCRIPTION_TEMPLATE = (
+    "Conventions for running a scientific workflow on {facility} IRI through the "
     "available MCP tools: verify facility/resource status first, prefer short "
     "run_job scripts, read errors with fs_tail, never invent account/queue/"
     "duration, and verify outputs."
 )
 
-WORKFLOW_USER_TEXT = """\
-You are assisting a scientist who will run a workflow on the NERSC IRI facility
+WORKFLOW_USER_TEXT_TEMPLATE = """\
+You are assisting a scientist who will run a workflow on the {facility} IRI facility
 through the MCP tools on this server. Follow these conventions:
 
 1. Orient first. Call get_facility_info and get_resource_status before any
@@ -64,14 +64,20 @@ and verify every produced artifact against expected values and checksums. I will
 ask for the account/queue/duration and for any expected outputs I should verify.
 """
 
+# NERSC-rendered defaults, kept as module constants for callers/tests.
+WORKFLOW_DESCRIPTION = WORKFLOW_DESCRIPTION_TEMPLATE.format(facility="NERSC")
+WORKFLOW_USER_TEXT = WORKFLOW_USER_TEXT_TEMPLATE.format(facility="NERSC")
 
-def register_prompt(mcp: MCPServer) -> None:
+
+def register_prompt(mcp: MCPServer, facility: str = "NERSC") -> None:
     """Register the scientific-workflow prompt on the server."""
+    description = WORKFLOW_DESCRIPTION_TEMPLATE.format(facility=facility)
+    user_text = WORKFLOW_USER_TEXT_TEMPLATE.format(facility=facility)
 
-    @mcp.prompt("conduct-scientific-workflow", description=WORKFLOW_DESCRIPTION)
+    @mcp.prompt("conduct-scientific-workflow", description=description)
     async def conduct_scientific_workflow(task: str | None = None) -> list[Message]:
         """Render the workflow conventions, optionally seeded with a task."""
-        messages: list[Message] = [UserMessage(content=WORKFLOW_USER_TEXT)]
+        messages: list[Message] = [UserMessage(content=user_text)]
         if task:
             messages.append(
                 UserMessage(

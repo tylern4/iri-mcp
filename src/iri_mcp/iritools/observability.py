@@ -14,7 +14,7 @@ def register(mcp: MCPServer, runner: Runner) -> None:
     @mcp.tool()
     @iri_tool
     async def get_facility_info() -> dict:
-        """Fetch metadata about the NERSC IRI facility.
+        """Fetch metadata about the configured IRI facility.
 
         Read-only and requires no credentials. A good first call: confirms the
         assistant can reach the facility API and returns the facility name,
@@ -25,7 +25,7 @@ def register(mcp: MCPServer, runner: Runner) -> None:
     @mcp.tool()
     @iri_tool
     async def get_facility_sites() -> list:
-        """List the sites served by the NERSC IRI facility.
+        """List the sites served by the configured IRI facility.
 
         Read-only and requires no credentials. Returns site metadata such as
         operating organization and location.
@@ -57,9 +57,10 @@ def register(mcp: MCPServer, runner: Runner) -> None:
     async def list_projects() -> list:
         """List the IRI projects the authenticated user belongs to.
 
-        Requires credentials (IRI_API_TOKEN or ~/.ssh/nersc-token). Use this to
-        discover valid ``account`` values before submitting a job; never invent
-        an account.
+        Requires credentials (a facility bearer token; see the README for the
+        per-facility environment variable or token file). Use this to discover
+        valid ``account`` values before submitting a job; never invent an
+        account.
         """
         return await runner.projects()
 

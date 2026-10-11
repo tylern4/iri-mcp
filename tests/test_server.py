@@ -48,6 +48,21 @@ def test_server_identity_and_defaults():
     assert "Read-only by default" in server.instructions
 
 
+def test_server_identity_is_facility_aware():
+    nersc = build_server(make_config())
+    alcf = build_server(make_config(facility="alcf"))
+    assert nersc.title == "NERSC IRI"
+    assert alcf.title == "ALCF IRI"
+    assert "ALCF IRI MCP server" in alcf.instructions
+
+
+async def test_workflow_prompt_is_facility_aware(make_server):
+    server = make_server(config=make_config(facility="esnet"))
+    result = await server.get_prompt("conduct-scientific-workflow", {"task": "x"})
+    texts = [m.content.text for m in result.messages]
+    assert any("ESnet IRI facility" in t for t in texts)
+
+
 async def test_all_tools_registered(make_server):
     server = make_server()
     names = await _tools(server)

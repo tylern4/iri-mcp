@@ -17,9 +17,13 @@ updated to stay truthful.
 
 ### Goals
 
-- Expose the NERSC IRI API surface as MCP **tools** (observability, compute,
+- Expose the IRI Facility API surface as MCP **tools** (observability, compute,
   filesystem), one **prompt**, and read-only **resources**, over `stdio` (default)
   and `streamable-http`.
+- Support every known IRI deployment through a **facility registry**: NERSC
+  (default), ALCF, and ESnet. The tool surface is identical; a `--facility`
+  preset supplies the base URL, resource bindings, discovery strategy, and token
+  sources (see §6).
 - Be **agent-harness agnostic**: all copy (descriptions, prompt, docs) refers to
   the caller as "the assistant" / "the agent", never by a brand name.
 - **Offline by default**: every test is hermetic (stubbed `AsyncClient` /
@@ -32,9 +36,10 @@ updated to stay truthful.
 
 ### Non-goals (this phase)
 
-- No new credential handling: the token is resolved lazily by the client from
-  `access_token` arg → `IRI_API_TOKEN` → `~/.ssh/nersc-token`.
-- No OAuth / token-minting / token refresh.
+- No new credential handling: the token is resolved lazily from the
+  `access_token` arg, `IRI_MCP_API_TOKEN`, the selected facility's environment
+  variable (e.g. `ALCF_API_TOKEN`), or its token file (e.g.
+  `~/.ssh/nersc-token`). No OAuth / token-minting / token refresh.
 - No streaming of very large files; reads are size-capped by design.
 - Not a general-purpose NERSC CLI; only the documented tool surface.
 - Live (authenticated) testing is out of scope for CI and for this environment
@@ -47,7 +52,8 @@ updated to stay truthful.
 ```
 client = iri_client.AsyncClient        (token-free public endpoints OK)
    ▲
-iri_mcp/config.py                     CLI flags + env (readonly default, caps, queues)
+iri_mcp/config.py                     CLI flags + env (readonly default, caps, queues, facility)
+iri_mcp/facilities.py                 facility presets (base URL, resources, discovery, tokens)
 iri_mcp/safety.py                     Policy gate: mode + caps; audit log → stderr/file
 iri_mcp/runner.py                     Runner (submit/wait/read-file/checksum) + IriRunner
 iri_mcp/iritools/…                    tool handlers (observability / compute / filesystem)
@@ -132,11 +138,14 @@ to write the audit file is logged, not fatal).
 
 ### 3.4 Credentials
 
-No new secret handling. The client resolves a bearer token lazily:
-`access_token` arg → `IRI_API_TOKEN` → `~/.ssh/nersc-token`. Token-free public
+No new secret handling (no storage, cache, or minting). Token resolution is
+facility-aware and lazy: `IRI_MCP_API_TOKEN` → the selected facility's env
+variable (`IRI_API_TOKEN` for NERSC, `ALCF_API_TOKEN`, `ESNET_API_TOKEN`) → the
+facility token file (`~/.ssh/nersc-token`, `~/.ssh/alcf-token`,
+`~/.ssh/esnet-token`). If none is found the client's own fallback
+(`IRI_API_TOKEN` / `~/.ssh/nersc-token`) still applies. Token-free public
 endpoints (facility, status, resource discovery) work with no token. Privileged
-calls without a token surface `AuthError` as
-`no credentials: set IRI_API_TOKEN or ~/.ssh/nersc-token`.
+calls without a token surface `AuthError` as the `AUTH_HINT` text in §3.5.
 
 ### 3.5 Error mapping
 
@@ -146,7 +155,7 @@ client receives these in the tool result content):
 | Client exception | Tool message |
 |---|---|
 | `SafetyPolicyError` (`PolicyError`) | the actionable policy message (see §3.1/§3.2) |
-| `AuthError` | `no credentials: set IRI_API_TOKEN or ~/.ssh/nersc-token` |
+| `AuthError` | `AUTH_HINT`: `no credentials: set IRI_API_TOKEN (or ALCF_API_TOKEN / ESNET_API_TOKEN), or a token file such as ~/.ssh/nersc-token` |
 | `ResourceLookupError` | `resource lookup failed: <message>` |
 | `TimeoutError` | `<message>` (e.g. job did not reach a terminal state) |
 | `httpx.HTTPStatusError` | `IRI API error: HTTP <status> <reason> for <METHOD> <path>` |
@@ -309,6 +318,7 @@ Precedence: CLI flags > environment > defaults. Env names are `IRI_MCP_*`.
 
 | Flag | Env | Default | Meaning |
 |---|---|---|---|
+| `--facility` | `IRI_MCP_FACILITY` | `nersc` | Facility preset: `nersc` \| `alcf` \| `esnet` |
 | `--readonly` | `IRI_MCP_READONLY` | implicit | Force read-only (wins over allow flags) |
 | `--allow-submit` | `IRI_MCP_ALLOW_SUBMIT` | off | Enable job submit/run/cancel |
 | `--allow-fs-write` | `IRI_MCP_ALLOW_FS_WRITE` | off | Enable filesystem writes |
@@ -322,11 +332,35 @@ Precedence: CLI flags > environment > defaults. Env names are `IRI_MCP_*`.
 | `--audit-file` | `IRI_MCP_AUDIT_FILE` | — | Audit JSONL path (else stderr) |
 | `--transport` | `IRI_MCP_TRANSPORT` | stdio | `stdio` or `streamable-http` |
 | `--host` / `--port` | `IRI_MCP_HOST` / `IRI_MCP_PORT` | 127.0.0.1 / 8000 | HTTP transport bind |
-| `--api-base-url` | `IRI_MCP_API_BASE_URL` | `https://api.iri.nersc.gov/api/v1` | IRI API base (testing) |
-| `--compute-resource` | `IRI_MCP_COMPUTE_RESOURCE` | `jobs` | Compute resource name/group |
-| `--filesystem-resource` | `IRI_MCP_FILESYSTEM_RESOURCE` | `scratch` | Filesystem resource name/group |
+| `--api-base-url` | `IRI_MCP_API_BASE_URL` | facility preset | IRI API base (testing) |
+| `--compute-resource` | `IRI_MCP_COMPUTE_RESOURCE` | facility preset | Compute resource id/name/group |
+| `--filesystem-resource` | `IRI_MCP_FILESYSTEM_RESOURCE` | facility preset | Filesystem resource id/name/group |
 | `--wait-interval` | `IRI_MCP_WAIT_INTERVAL` | 10 | Job/task poll interval (seconds) |
 | `--log-level` | `IRI_MCP_LOG_LEVEL` | INFO | Server logging level |
+
+### 6.1 Facility presets
+
+`--facility` selects a preset from `iri_mcp/facilities.py`; the explicit flags
+above (`--api-base-url`, `--compute-resource`, `--filesystem-resource`) still
+win over the preset's values.
+
+| Facility | Base URL | Compute | Filesystem | Discovery | Token env / file |
+|---|---|---|---|---|---|
+| `nersc` | `https://api.iri.nersc.gov/api/v1` | `jobs` | `scratch` | router | `IRI_API_TOKEN` / `~/.ssh/nersc-token` |
+| `alcf` | `https://api.alcf.anl.gov/api/v1` | `Polaris` | `Eagle` | status | `ALCF_API_TOKEN` / `~/.ssh/alcf-token` |
+| `esnet` | `https://iri-dev.ppg.es.net/api/v1` | `compute` | `storage` | router | `ESNET_API_TOKEN` / `~/.ssh/esnet-token` |
+
+Discovery strategies (resolved in `IriRunner._discover_resources`):
+
+- **router** — `GET /compute/resources` + `GET /filesystem/resources`, the
+  per-router discovery endpoints (NERSC, ESnet).
+- **status** — filter the public `GET /status/resources` list by
+  `resource_type` (ALCF, whose router endpoints return HTTP 501). A `router`
+  failure also falls back to `status`, so a deployment that stops implementing
+  router discovery keeps working.
+
+The configured resource is matched by id, name, or group (case-insensitive);
+the match failure lists the available names.
 
 ---
 
@@ -397,4 +431,26 @@ explicitly permitted by the brief:
      `enabled` field; servers are enabled unless `disabled: true`).
   4. Offline end-to-end smoke (`scripts/smoke_mcp.sh`) and CI
      (`.github/workflows/ci.yml`, py3.10/3.11/3.12) added; no live calls.
+- **2026-10-11 (M4 — multi-facility: ALCF + ESnet)** — Additions beyond §4's
+  NERSC-only scope; the tool surface and §4 contract are unchanged:
+  1. New `facilities.py` registry (`nersc` default, `alcf`, `esnet`) and a
+     `--facility` / `IRI_MCP_FACILITY` selector (§6.1). Presets fill
+     `--api-base-url` / `--compute-resource` / `--filesystem-resource` unless
+     those are given explicitly, so prior invocations are unaffected.
+  2. `IriRunner` now binds resources via `_discover_resources`, supporting the
+     **router** endpoints (NERSC, ESnet) and a **status** strategy that filters
+     the public `/status/resources` list by `resource_type` (ALCF, whose router
+     discovery returns HTTP 501). A failing router lookup falls back to status.
+     This adds two private-ish imports (`iri_client._async.compute.AsyncCompute`,
+     `iri_client._async.filesystem.AsyncFilesystem`) to construct a resource
+     object from a resolved id without a second discovery round-trip.
+  3. Token resolution is facility-aware (§3.4): `IRI_MCP_API_TOKEN` → facility
+     env (`IRI_API_TOKEN` / `ALCF_API_TOKEN` / `ESNET_API_TOKEN`) → facility
+     token file. Still no storage/cache/minting; the client fallback is intact.
+  4. `AUTH_HINT` (§3.5) now names the facility token variables. Server
+     title/description/instructions and the workflow prompt render the selected
+     facility's display name; the MCP server *name* stays `iri`.
+  5. `FakeIRI.discovery_status` simulates the ALCF 501 so the fallback path is
+     covered hermetically; `tests/test_facilities.py` + config tests cover
+     presets, both strategies, case-insensitive matching, and token resolution.
 - *(future entries appended here)*

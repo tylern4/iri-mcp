@@ -2,6 +2,56 @@
 
 Checkpoint log for `iri-mcp`. One entry per session/issue. Latest first.
 
+## 2026-10-11 — Session 2 (M4): multi-facility (ALCF + ESnet)
+
+**What changed** — the server now speaks every known IRI deployment, not just
+NERSC; tool surface and §4 contract unchanged:
+
+- `src/iri_mcp/facilities.py` (new) — `Facility` registry: `nersc` (default),
+  `alcf`, `esnet`. Each preset carries base URL, compute/filesystem resource
+  defaults, a discovery strategy (`router` vs `status`), token env vars, and a
+  token file. Probed the live APIs first: ALCF `https://api.alcf.anl.gov/api/v1`
+  (router discovery `/compute/resources` + `/filesystem/resources` return **501**;
+  `/status/resources` is public and lists `Polaris`/`Aurora`/`Crux` compute and
+  `Eagle`/`Flare`/`Home` storage); ESnet `https://iri-dev.ppg.es.net/api/v1`
+  (compute group `compute`, storage group `storage`).
+- `config.py` — `--facility` / `IRI_MCP_FACILITY` selector (+ validation);
+  presets supply `--api-base-url` / `--compute-resource` / `--filesystem-resource`
+  defaults, explicit flags still win; `Config.resolve_token()` + `.profile`
+  / `.compute_discovery` / `.filesystem_discovery`.
+- `runner.py` — `_compute` / `_filesystem` / `_resolve_resource` /
+  `_discover_resources`; all 19 call sites now bind through them. `router`
+  discovery, with a `status` strategy and a router→status fallback, using the
+  client's `Resource` model + `ResourceType` filter; case-insensitive id/name/
+  group matching with an "available: …" error. Direct construction of
+  `AsyncCompute` / `AsyncFilesystem` from a resolved id (private client modules)
+  avoids a second discovery round-trip per call.
+- `errors.py` — `AUTH_HINT` names the facility token variables (keeps
+  `IRI_API_TOKEN` for existing tests).
+- `server.py` / `prompt.py` — server title/description/instructions and the
+  workflow prompt render the selected facility's display name; server name stays
+  `iri`.
+- `tests/` — `test_facilities.py` (new: router vs status, 501 fallback,
+  case-insensitive match, friendly unresolved-resource error); config tests for
+  presets, override precedence, unknown facility, and token resolution;
+  `test_server.py` identity/prompt facility-awareness; `fake_iri.py` gained
+  `discovery_status` to simulate ALCF's 501.
+- Docs: README (facilities table + section, security bullet, layout, appendix),
+  PLAN §1/§2/§3.4/§3.5/§6 (facility presets) and §8 deviation entry,
+  `docs/demo.md` note.
+
+**Test evidence** — `uv run ruff check .` clean. `uv run pytest -q` →
+**132 passed** (114 + 18). `scripts/smoke_mcp.sh` → **SMOKE PASS** (18 checks,
+including the resource reads) against the NERSC fake.
+
+**Open issues** — Live ALCF/ESnet calls not exercised (no accounts/tokens in
+this environment; same `IRI_MCP_LIVE=1` restriction as NERSC). ESnet base URL is
+the dev deployment (`iri-dev.ppg.es.net`) the user provided. ALCF `list_jobs`
+filters use NERSC's `state`/`queue_name` keys, which ALCF's POST body may not
+honor (listing itself works). `AsyncCompute`/`AsyncFilesystem` are imported from
+private client modules — revisit if `nersc-iri-client` exports them. GitHub push
+still deferred (no gh auth).
+
 ## 2026-10-11 — Session 1 (M3 stretch): resources + friendly 4xx
 
 **What changed** — stretch resources implemented, plus a small error-mapping fix:
