@@ -1,0 +1,51 @@
+[project]
+name = "iri-mcp"
+version = "0.1.0"
+description = "MCP server exposing the NERSC IRI API (jobs, files, status) to agent harnesses"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "tylern4" }]
+dependencies = [
+    "mcp>=2.0",
+    "pydantic~=2.0",
+    # Prototype: consume the client from the latest source on its default
+    # branch. Pin to a tag/release before any production use.
+    "nersc-iri-client @ git+https://github.com/tylern4/nersc-iri-client@main",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[project.scripts]
+iri-mcp = "iri_mcp.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iri_mcp"]
+
+# Our dependencies include a git direct reference (nersc-iri-client @ main).
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "live: talks to the real IRI API (requires IR_MCP_LIVE=1 and credentials)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
