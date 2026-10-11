@@ -358,4 +358,24 @@ explicitly permitted by the brief:
   capped tails; `list_jobs` default `limit=50`; backend filter keys are
   `state`/`queue_name`. None of these change the required tool names or the
   gate/cap semantics.
+- **2026-10-11 (Session 1 — implementation + hermetic tests)** — MCP SDK v2
+  behavior locked in by 106 offline tests (no deviations from §4):
+  1. In-process `MCPServer.call_tool` **raises** `ToolError` when a tool fails;
+     the protocol handler (`_handle_call_tool`) is what materializes
+     `CallToolResult(is_error=True)` and prefixes the message with
+     `Error executing tool <name>: `. `errors.iri_tool` keeps producing the
+     friendly text; tests assert on the substring after the prefix.
+  2. `convert_result` emits `structured_content` only when a tool has an output
+     schema (pydantic models, annotated `list[...]`/`dict[...]` returns). The
+     observability handlers are bare `-> list`/`-> dict`, so they produce
+     text-only content (one JSON text block per list item).
+  3. The client's `filesystem.upload` does not close its multipart file object
+     (upstream client quirk; low-impact fd per `fs_write_text` call — tracked,
+     not fixed here).
+  4. `fs_read` maps the read cap to the client `head` `bytes` query parameter;
+     the default (`max_bytes=None`) sends the full cap.
+  5. On the MCP wire, `submit_job`/`run_job`/`wait_job` return `JobResult`
+     (state/exit_code/tails); `list_jobs`/`fs_list` return `{"result": [...]}`.
+  6. Job caps defined as **reject**, read caps as **clamp**, write cap as
+     **reject** — all enforced in `safety.py::Policy` and covered by tests.
 - *(future entries appended here)*

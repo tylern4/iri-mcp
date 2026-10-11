@@ -2,6 +2,35 @@
 
 Checkpoint log for `iri-mcp`. One entry per session/issue. Latest first.
 
+## 2026-10-11 — Session 1 (cont.): implementation + hermetic tests
+
+**What changed** — All M1/M2/M3 code landed and is covered by tests:
+
+- `src/iri_mcp/`: `config.py`, `safety.py` (Policy gate + caps + AuditLog),
+  `errors.py` (`iri_tool` → friendly `ToolError`), `client.py` (client_session
+  factory), `runner.py` (`Runner` ABC + `IriRunner`: observability, compute,
+  filesystem, tails, gated writes), `schemas.py` (`JobSpecInput`/`JobResult`),
+  `prompt.py` (`conduct-scientific-workflow`), `server.py` (`build_server`,
+  `main`), `__main__.py`, `iritools/{observability,compute,filesystem}.py`.
+- `tests/`: `fake_iri.py` (stateful `httpx.MockTransport` fake), `helpers.py`,
+  `conftest.py` (make_config/make_runner/make_server, quiet httpx logs), and
+  `test_config/test_safety/test_observability/test_compute/test_filesystem/
+  test_server/test_runner`.
+- `pyproject.toml`: pytest `asyncio_mode=auto`; ruff isort
+  `known-first-party = ["iri_mcp", "fake_iri", "helpers"]`.
+- `PLAN.md` §8: SDK v2 behavior notes (see entry).
+
+**Test evidence** — `uv run ruff check .` clean (E4/E7/E9/F/I/UP/B, all files
+auto-fixed to PEP 585/604 + `collections.abc`). `uv run pytest` → **106 passed**
+in ~4s, offline against the fake. Verified via `MCPServer.call_tool`:
+23 tools + 1 prompt registered; protocol-level error conversion (ToolError
+raises in-process, `is_error` on the wire); cap clamping observable in fake
+query params; no-token runs yield the friendly credentials message.
+
+**Open issues** — Live IRI calls still blocked (no account/token;
+`IRI_MCP_LIVE=1` only). Upstream client `upload` leaks a multipart file object
+per call (noted in PLAN §8). Remote push deferred (no gh auth).
+
 ## 2026-10-11 — Session 1 (M0: contract + scaffold)
 
 **Context** — New project in `/home/ranger/github.com/iri-mcp` (empty dir).
