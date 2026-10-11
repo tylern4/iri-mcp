@@ -2,6 +2,37 @@
 
 Checkpoint log for `iri-mcp`. One entry per session/issue. Latest first.
 
+## 2026-10-11 — Session 3 (dogfood): opencode config + unauthed verification
+
+**What changed** — no repo source changes; harness integration verified end to end:
+
+- Added the `iri` server to the **global** opencode config
+  (`~/.config/opencode/opencode.json`) alongside the existing repo-scoped
+  `./opencode.json`, so it resolves from any directory. Entry uses an absolute
+  `--project` path: `uv run --project /home/ranger/github.com/iri-mcp python -m
+  iri_mcp` (local, `type: local`), plus `$schema`. Repo working tree clean.
+- `opencode mcp list` → `✓ iri connected` from both the repo (project config)
+  and `/tmp/opencode` (global-only). A `opencode service restart` was needed for
+  the running service to pick up the new global file (and to reload the server
+  process onto post-M4 code — the previously-connected process predated the
+  resource registration, so `resources/templates` were absent until the restart).
+
+**Test evidence** — all four unauthenticated tools exercised through the live
+opencode MCP connection (not in-process): `get_facility_info` (NERSC id/name/org/
+`support_uri`/`site_uris`), `get_facility_sites` (LBNL site + `resource_uris`),
+`get_resource_status` (37 resources, all `up`), `get_incidents` (~100 KB, planned/
+unplanned). `list_mcp_resources` shows both templates registered:
+`iri://files{+path}` (text/plain) and `iri://jobs/{job_id}` (application/json).
+Auth gate confirmed friendly: `list_projects` and a `iri://jobs/{id}` resource
+read with no token both return `no credentials: set IRI_API_TOKEN (or
+ALCF_API_TOKEN / ESNET_API_TOKEN), or a token file such as ~/.ssh/nersc-token`
+— no traceback. Repo `uv run pytest`/smoke unchanged (no code touched).
+
+**Open issues** — dogfood covered the read-only surface only; privileged calls
+(`--allow-submit` / `--allow-fs-write`) still not exercised under a harness (no
+credentials here). Global config hardcodes the repo path — revisit if the repo
+moves or is invoked via a wrapper.
+
 ## 2026-10-11 — Session 2 (M4): multi-facility (ALCF + ESnet)
 
 **What changed** — the server now speaks every known IRI deployment, not just
