@@ -91,4 +91,77 @@ All tests are hermetic (canned HTTP / stubbed client). Live IRI calls require
 - `iri_mcp/server.py` — `MCPServer("iri")` wiring and transports
 
 See [`PLAN.md`](PLAN.md) for the architecture and API contract, and
-[`AGENTS.md`](AGENTS.md) for the development checkpoints.
+[`AGENTS.md`](AGENTS.md) for the development checkpoints. An offline end-to-end
+walkthrough (fake backend + real MCP client) is in [`docs/demo.md`](docs/demo.md).
+
+## Integration appendix
+
+The server speaks MCP over stdio; the server name is `iri`. In every harness
+below the command is `uv run python -m iri_mcp` — replace `uv` with its
+absolute path (`command -v uv`) in launchers that don't inherit your shell
+environment, and add `--allow-submit` / `--allow-fs-write` to grant compute /
+filesystem writes (see [Security model](#security-model)).
+
+The repo ships an [`opencode.json`](opencode.json) that wires the server up for
+opencode out of the box.
+
+### opencode
+
+`opencode.json` at the repo root (already present):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "iri": {
+        "type": "local",
+        "command": ["uv", "run", "python", "-m", "iri_mcp"]
+      }
+    }
+  }
+}
+```
+
+Start opencode in the repo and the `iri_*` tools are available (readonly by
+default). To use this config from any directory, replace `command` with an
+absolute repo path: `["uv", "run", "--project", "/path/to/iri-mcp", "python",
+"-m", "iri_mcp"]`, and add `"cwd": "/path/to/iri-mcp"`.
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json` (Claude → Settings → Developer). Paths must
+be absolute:
+
+```json
+{
+  "mcpServers": {
+    "iri": {
+      "command": "/path/to/uv",
+      "args": ["run", "--project", "/path/to/iri-mcp", "python", "-m", "iri_mcp"]
+    }
+  }
+}
+```
+
+### Cursor
+
+Place `.mcp.json` in the project root (Cursor runs the command from there):
+
+```json
+{
+  "mcpServers": {
+    "iri": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "iri_mcp"]
+    }
+  }
+}
+```
+
+### Any MCP client
+
+Anything honoring the MCP spec can connect with the same shape: a stdio command
+running `uv run python -m iri_mcp`, or a Streamable HTTP endpoint via
+`python -m iri_mcp --transport streamable-http` (see `iri_mcp/server.py` for
+the app factory and mount details).

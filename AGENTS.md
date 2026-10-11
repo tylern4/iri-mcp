@@ -2,6 +2,42 @@
 
 Checkpoint log for `iri-mcp`. One entry per session/issue. Latest first.
 
+## 2026-10-11 — Session 1 (M3): docs, CI, harness integration
+
+**What changed** — M3 deliverables landed; smoke fixed and verified:
+
+- `scripts/` (all three, committed): `fake_iri_http.py` (canned HTTP backend
+  reusing `FakeIRI` via `httpx.Request` bridging; seeds hello.out/checksum),
+  `smoke_client.py` (real MCP stdio client; fixed missing `import os` for the
+  `env=dict(os.environ)` SDK allowlist workaround), `smoke_mcp.sh` (executable
+  orchestrator, `set -euo pipefail`, trap kills backend, logs to
+  `${TMPDIR}/iri-mcp-smoke`).
+- `opencode.json` — V2 schema (`$schema` + `mcp.servers.iri`, `type: local`,
+  readonly `uv run python -m iri_mcp`; `disabled` not `enabled` per V2 docs).
+  Verified live: `opencode mcp list` → `✓ iri  connected`, and the `iri_*`
+  tools appeared in the harness catalog.
+- README: new "Integration appendix" (opencode / Claude Desktop absolute-path
+  config / Cursor `.mcp.json` / generic stdio + streamable-http note) and a
+  link to `docs/demo.md`.
+- `docs/demo.md` — offline end-to-end walkthrough: what the smoke proves, exact
+  output, anatomy of one `run_job` call, manual interactive demo, opencode
+  note, live-mode caveat.
+- `.github/workflows/ci.yml` — setup-uv + Python 3.10/3.11/3.12 matrix:
+  `uv sync --extra dev`, `uv run ruff check .`, `uv run pytest -q`,
+  `scripts/smoke_mcp.sh` (offline; no credentials needed).
+
+**Test evidence** — `uv run ruff check .` clean. `uv run pytest -q` →
+**106 passed** (~3.7s). `scripts/smoke_mcp.sh` → **SMOKE PASS** through
+initialize / tools/list (23) / prompts/list / facility / resources / projects /
+submit_job / run_job (tails) / wait_job / fs_head / fs_checksum over real
+stdio+HTTP against the fake backend.
+
+**Open issues** — GitHub remote push still deferred (no gh auth). Live IRI
+calls still blocked (no account/token; `IRI_MCP_LIVE=1` only). Stretch
+resources (`iri://jobs/{id}`, `iri://files/{path}`) and `ResourceSecurity`
+not yet implemented; opencode read-only verified, privileged surface not
+exercised under a harness.
+
 ## 2026-10-11 — Session 1 (cont.): implementation + hermetic tests
 
 **What changed** — All M1/M2/M3 code landed and is covered by tests:
